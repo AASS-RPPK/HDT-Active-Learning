@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 import time
 import uuid
@@ -11,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="HDT Active Learning (FastAPI)")
+logger = logging.getLogger("hdt.active_learning")
 
 app.add_middleware(
     CORSMiddleware,
@@ -147,26 +149,21 @@ async def upload_feedback(
 async def _simulate_training(req: TrainingRequest) -> dict[str, Any]:
     async with training_lock:
         job_id = str(uuid.uuid4())
+        payload = req.model_dump()
         _training_job.update(
             {
                 "jobId": job_id,
-                "state": "running",
+                "state": "logged",
                 "startedAt": int(time.time()),
-                "completedAt": None,
-                "params": req.model_dump(),
+                "completedAt": int(time.time()),
+                "params": payload,
             }
         )
-
-    # Simulate a short training window.
-    await asyncio.sleep(1.5)
-
-    async with training_lock:
-        _training_job["state"] = "completed"
-        _training_job["completedAt"] = int(time.time())
+    logger.info("Received train request (no-op): %s", payload)
 
     return {
         "status": "ok",
-        "message": "Fine-tuning started (simulated).",
+        "message": "Train request logged (no-op).",
         "jobId": job_id,
         "mode": req.mode,
         "epochs": req.epochs,
@@ -178,31 +175,14 @@ async def _simulate_training(req: TrainingRequest) -> dict[str, Any]:
 async def _simulate_deploy(req: DeployRequest) -> dict[str, Any]:
     global _current_model_version
     async with deployment_lock:
-        if req.action == "deploy":
-            # Move forward: create a "new" model version.
-            version_hint = (req.modelVersion or "").strip()
-            if version_hint:
-                new_version = version_hint
-            else:
-                major = len(_model_history)
-                new_version = f"v0.{major}.{random.randint(0, 9)}"
-
-            _current_model_version = new_version
-            _model_history.append(new_version)
-        else:
-            # Roll back: pop to previous version if possible.
-            if len(_model_history) > 1:
-                _model_history.pop()
-                _current_model_version = _model_history[-1]
-
-        model_version_after = _current_model_version
-
-    # Simulate a short deploy/rollback window.
-    await asyncio.sleep(1.0)
+        payload = req.model_dump()
+        model_version_after = (req.modelVersion or _current_model_version or "v0.0.0").strip() or "v0.0.0"
+        _current_model_version = model_version_after
+    logger.info("Received deploy request (no-op): %s", payload)
 
     return {
         "status": "ok",
-        "message": "Deploy requested (simulated)." if req.action == "deploy" else "Rollback requested (simulated).",
+        "message": "Deploy request logged (no-op)." if req.action == "deploy" else "Rollback request logged (no-op).",
         "action": req.action,
         "modelVersion": model_version_after,
     }
